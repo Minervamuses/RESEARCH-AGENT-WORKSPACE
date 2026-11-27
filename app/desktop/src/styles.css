@@ -108,10 +108,10 @@ h3 {
 
 .app-shell {
   --resizer-width: 6px;
-  --activity-bar-width: 0px;
+  --activity-bar-width: 44px;
   --sidebar-viewport-max: calc(100vw - var(--activity-bar-width) - (var(--resizer-width) * 2) - 600px);
   display: grid;
-  grid-template-columns: var(--sidebar-track, minmax(10.15rem, 11.9rem)) var(--resizer-width) minmax(0, 1fr);
+  grid-template-columns: var(--activity-bar-width) var(--sidebar-track, minmax(10.15rem, 11.9rem)) var(--resizer-width) minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
   overflow: hidden;
@@ -125,16 +125,28 @@ h3 {
 }
 
 @media (min-width: 761px) {
-  .app-shell > .sidebar {
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: var(--activity-bar-width) minmax(0, 1fr);
+  }
+
+  .app-shell > .activity-bar {
     grid-column: 1;
   }
 
-  .app-shell > .column-resizer-sidebar {
+  .app-shell > .sidebar {
     grid-column: 2;
   }
 
-  .app-shell > .main-workspace {
+  .app-shell > .column-resizer-sidebar {
     grid-column: 3;
+  }
+
+  .app-shell > .main-workspace {
+    grid-column: 4;
+  }
+
+  .app-shell.sidebar-collapsed > .main-workspace {
+    grid-column: 2;
   }
 }
 

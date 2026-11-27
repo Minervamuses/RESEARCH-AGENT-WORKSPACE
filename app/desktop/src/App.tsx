@@ -53,10 +53,12 @@ import type { AnnotationControls } from "./components/Annotation.tsx";
 import { Transcript } from "./components/Transcript.tsx";
 import type { BibliographyAddDto, BibliographyEntryDto } from "./citations.ts";
 import { ApprovalDialog } from "./components/ApprovalDialog.tsx";
+import { ActivityBar } from "./components/ActivityBar.tsx";
 import { Composer, ComposerNotices } from "./components/Composer.tsx";
 import { ColumnResizer, type ResizerKeyboardAction } from "./components/ColumnResizer.tsx";
 import { ConversationMenu, DeleteConversationDialog, RenameConversationDialog } from "./components/ConversationDialogs.tsx";
 import { DocumentPane } from "./components/DocumentPane.tsx";
+import { OutlineView } from "./components/OutlineView.tsx";
 import { phaseLabels } from "./components/phaseLabels.ts";
 import { ProjectChooser } from "./components/ProjectChooser.tsx";
 import { RuntimeDetails } from "./components/RuntimeDetails.tsx";
@@ -81,6 +83,7 @@ import {
 } from "./lib/approvalOwner.ts";
 import { applyReducerOnce } from "./lib/reducerOnce.ts";
 import {
+  ACTIVITY_BAR_WIDTH,
   clearDocumentRatio,
   clearSidebarWidth,
   computeDraggedDocumentRatio,
@@ -100,6 +103,7 @@ import {
   writeDocumentRatio,
   writeSidebarWidth,
 } from "./lib/layout.ts";
+import { useDocumentOutline } from "./hooks/useDocumentOutline.ts";
 import { useExtensions } from "./hooks/useExtensions.ts";
 import {
   beginExtensionPreview,
@@ -136,9 +140,15 @@ import {
 import { protocolMismatch, workspaceError } from "./lib/errors.ts";
 import { api, eventData, listenBackendEvents } from "./api.ts";
 import {
+  INITIAL_SIDEBAR_VIEW_STATE,
   loadSelectedProjectHistory,
   mergeSessionItems,
+  selectSidebarView,
+  sidebarStateOnDocumentCleared,
+  sidebarStateOnDocumentOpen,
   type SidebarSessionRow,
+  type SidebarView,
+  type SidebarViewState,
 } from "./lib/sidebar.ts";
 import {
   TRANSCRIPT_PAGE_SIZE,
@@ -443,6 +453,7 @@ export default function App() {
       const snapshot: DocumentContextDto = { ...opened, rootPath: openedRoot, editorRevision: opened.editorRevision ?? 0 };
       documentBaselineRef.current = { ...snapshot };
       updateDocument(snapshot);
+      setSidebarViewState((prev) => sidebarStateOnDocumentOpen(prev));
       setCitationRefresh((value) => value + 1);
       setDocumentConflict(null);
       setLastDocumentAction(null);
@@ -824,6 +835,7 @@ export default function App() {
       resetExtensions();
       commitApproval(clearApproval(approvalRef.current));
       updateDocument(null);
+      setSidebarViewState((prev) => sidebarStateOnDocumentCleared(prev));
       documentBaselineRef.current = null;
       submittedDocumentRef.current = null;
       selectedSkillNamesRef.current.clear();
@@ -1778,6 +1790,16 @@ export default function App() {
   const lifecycleBlocked = interaction.turnActive || documentBusy || pendingApproval !== null || workspaceBusy !== null;
   const lifecycleReady = state.snapshot?.lifecycle === "ready";
 
+  const [sidebarViewState, setSidebarViewState] = useState<SidebarViewState>(INITIAL_SIDEBAR_VIEW_STATE);
+  const {
+    outline: documentOutline,
+    collapsedIds: outlineCollapsedIds,
+    toggleCollapsed: toggleOutlineCollapsed,
+  } = useDocumentOutline(documentValue);
+  const handleSelectSidebarView = useCallback((target: SidebarView) => {
+    setSidebarViewState((prev) => selectSidebarView(prev, target));
+  }, []);
+
   const [sidebarWidthPx, setSidebarWidthPx] = useState<number | null>(() => readSidebarWidth());
   const [documentRatio, setDocumentRatio] = useState<number | null>(() => readDocumentRatio());
   const shellRef = useRef<HTMLDivElement>(null);
@@ -1802,9 +1824,9 @@ export default function App() {
 
   const readActivityBarWidth = useCallback((): number => {
     const shellEl = shellRef.current;
-    if (!shellEl || typeof getComputedStyle !== "function") return 0;
+    if (!shellEl || typeof getComputedStyle !== "function") return ACTIVITY_BAR_WIDTH;
     const raw = parseFloat(getComputedStyle(shellEl).getPropertyValue("--activity-bar-width"));
-    return Number.isFinite(raw) ? raw : 0;
+    return Number.isFinite(raw) ? raw : ACTIVITY_BAR_WIDTH;
   }, []);
 
   const applySidebarWidthCss = useCallback((widthPx: number) => {
@@ -1917,35 +1939,57 @@ export default function App() {
     setDocumentRatio(null);
   }, []);
 
+  const outlineViewNode = (
+    <OutlineView
+      documentPath={documentValue?.path ?? null}
+      outline={documentOutline}
+      collapsedIds={outlineCollapsedIds}
+      onToggleCollapse={toggleOutlineCollapsed}
+      onSelect={() => {}}
+    />
+  );
+
   return (
-    <div className="app-shell" ref={shellRef} style={shellStyle}>
+    <div className={`app-shell${sidebarViewState.collapsed ? " sidebar-collapsed" : ""}`} ref={shellRef} style={shellStyle}>
       <a className="skip-link" href="#main-workspace">Skip to main workspace</a>
-      <Sidebar
-        inert={deleteDialog !== null} phase={state.phase} snapshot={state.snapshot} hasError={state.error !== null}
-        project={project} list={openedList} selected={conversation.selected} selectedSaved={selectedSaved} historyLoaded={historyGeneration !== null}
-        newConversationDisabled={!canCreateSession || interaction.turnActive}
-        chooserDisabled={!idle || !lifecycleReady || state.diagnostics === null}
-        selectionDisabled={lifecycleBlocked}
-        canStart={canStart} canRestart={canRestart} canShutdown={canShutdown}
-        onCreateConversation={createSession} onShowChooser={showProjectChooser}
-        onSelectConversation={(projectId, session) => void selectConversation(projectId, session)}
-        onLoadMore={loadMoreSessions}
-        onOpenMenu={(menu, returnFocus) => { conversationMenuReturnFocusRef.current = returnFocus; setConversationMenu(menu); }}
-        onLifecycle={runLifecycle}
-      />
-      <ColumnResizer
-        className="column-resizer-sidebar"
-        label="Resize sidebar width"
-        valueNow={sidebarWidthPx ?? DEFAULT_SIDEBAR_WIDTH}
-        valueMin={MIN_SIDEBAR_WIDTH}
-        valueMax={MAX_SIDEBAR_WIDTH}
+      <ActivityBar
+        view={sidebarViewState.view}
+        collapsed={sidebarViewState.collapsed}
         inert={deleteDialog !== null}
-        onDragStart={startSidebarDrag}
-        onDragMove={moveSidebarDrag}
-        onDragEnd={endSidebarDrag}
-        onKeyboardStep={stepSidebarWidth}
-        onReset={resetSidebarWidth}
+        onSelectView={handleSelectSidebarView}
       />
+      {!sidebarViewState.collapsed && (
+        <>
+          <Sidebar
+            inert={deleteDialog !== null} phase={state.phase} snapshot={state.snapshot} hasError={state.error !== null}
+            project={project} list={openedList} selected={conversation.selected} selectedSaved={selectedSaved} historyLoaded={historyGeneration !== null}
+            newConversationDisabled={!canCreateSession || interaction.turnActive}
+            chooserDisabled={!idle || !lifecycleReady || state.diagnostics === null}
+            selectionDisabled={lifecycleBlocked}
+            canStart={canStart} canRestart={canRestart} canShutdown={canShutdown}
+            onCreateConversation={createSession} onShowChooser={showProjectChooser}
+            onSelectConversation={(projectId, session) => void selectConversation(projectId, session)}
+            onLoadMore={loadMoreSessions}
+            onOpenMenu={(menu, returnFocus) => { conversationMenuReturnFocusRef.current = returnFocus; setConversationMenu(menu); }}
+            onLifecycle={runLifecycle}
+            view={sidebarViewState.view}
+            outlineContent={outlineViewNode}
+          />
+          <ColumnResizer
+            className="column-resizer-sidebar"
+            label="Resize sidebar width"
+            valueNow={sidebarWidthPx ?? DEFAULT_SIDEBAR_WIDTH}
+            valueMin={MIN_SIDEBAR_WIDTH}
+            valueMax={MAX_SIDEBAR_WIDTH}
+            inert={deleteDialog !== null}
+            onDragStart={startSidebarDrag}
+            onDragMove={moveSidebarDrag}
+            onDragEnd={endSidebarDrag}
+            onKeyboardStep={stepSidebarWidth}
+            onReset={resetSidebarWidth}
+          />
+        </>
+      )}
 
       <main id="main-workspace" className="main-workspace" tabIndex={-1} inert={deleteDialog !== null}>
         <header className="workspace-header"><div><p className="eyebrow">CURRENT CONVERSATION</p><h2>{selectionPreview?.title ?? selectedSummary?.title ?? (conversation.selected === null ? "Start a local research conversation" : "New conversation")}</h2></div><span className="header-status" role="status" aria-live="polite">{workspaceBusy ?? phaseLabels[state.phase]}</span></header>

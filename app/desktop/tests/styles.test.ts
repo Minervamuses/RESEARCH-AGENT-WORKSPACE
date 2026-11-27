@@ -33,36 +33,48 @@ test("desktop type scale grows on wide windows and stays bounded", async () => {
   assert.ok(saturationPx <= 4000, "very wide windows must reach the upper bound");
 });
 
-test("layout.css loads after document.css and preserves original grid defaults and single-column breakpoints", async () => {
+test("layout.css and outline.css load after document.css and preserve grid defaults and breakpoints", async () => {
   const mainTsx = await readFile(resolve(currentDir, "../src/main.tsx"), "utf8");
   const stylesCss = await readFile(resolve(currentDir, "../src/styles.css"), "utf8");
   const documentCss = await readFile(resolve(currentDir, "../src/styles/document.css"), "utf8");
   const responsiveCss = await readFile(resolve(currentDir, "../src/styles/responsive.css"), "utf8");
   const layoutCss = await readFile(resolve(currentDir, "../src/styles/layout.css"), "utf8");
+  const outlineCss = await readFile(resolve(currentDir, "../src/styles/outline.css"), "utf8");
 
   const docImport = mainTsx.indexOf('import "./styles/document.css"');
   const layoutImport = mainTsx.indexOf('import "./styles/layout.css"');
+  const outlineImport = mainTsx.indexOf('import "./styles/outline.css"');
   assert.ok(docImport >= 0 && layoutImport > docImport, "layout.css must be imported after document.css");
+  assert.ok(outlineImport > layoutImport, "outline.css must be imported after layout.css");
 
-  assert.doesNotMatch(
-    layoutCss,
-    /\.(app-shell|writing-workspace)[^{]*\{[^}]*grid-template-columns/s,
-    "layout.css must not redefine .app-shell or .writing-workspace grid-template-columns",
-  );
+  for (const [name, css] of [["layout.css", layoutCss], ["outline.css", outlineCss]] as const) {
+    assert.doesNotMatch(
+      css,
+      /\.(app-shell|writing-workspace)[^{]*\{[^}]*grid-template-columns/s,
+      `${name} must not redefine .app-shell or .writing-workspace grid-template-columns`,
+    );
+  }
 
   // Original default tracks stay as CSS variable fallbacks.
   assert.match(stylesCss, /var\(--sidebar-track,\s*minmax\(10\.15rem,\s*11\.9rem\)\)/);
   assert.match(documentCss, /var\(--document-fr,\s*1\.05fr\)/);
   assert.match(documentCss, /var\(--conversation-fr,\s*1fr\)/);
 
-  // Single-column responsive breakpoints remain intact.
+  // Single-column responsive breakpoints remain intact for both expanded and collapsed <= 760px.
   assert.match(responsiveCss, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*?\.app-shell\s*\{[^}]*grid-template-columns:\s*1fr;/);
   assert.match(documentCss, /@media\s*\(max-width:\s*1050px\)\s*\{[\s\S]*?\.writing-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/);
 
-  // Multi-column grid-column placement is scoped to desktop widths only.
+  // Multi-column grid-column placement and collapsed two-column track apply only at > 760px.
   const desktopShellMedia = stylesCss.match(/@media\s*\(min-width:\s*761px\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
-  assert.match(desktopShellMedia, /\.app-shell\s*>\s*\.sidebar\s*\{[^}]*grid-column:/);
-  assert.match(desktopShellMedia, /\.app-shell\s*>\s*\.main-workspace\s*\{[^}]*grid-column:/);
+  assert.match(desktopShellMedia, /\.app-shell\.sidebar-collapsed\s*\{[^}]*grid-template-columns:/);
+  assert.match(desktopShellMedia, /\.app-shell\s*>\s*\.activity-bar\s*\{[^}]*grid-column:\s*1;/);
+  assert.match(desktopShellMedia, /\.app-shell\s*>\s*\.sidebar\s*\{[^}]*grid-column:\s*2;/);
+  assert.match(desktopShellMedia, /\.app-shell\s*>\s*\.column-resizer-sidebar\s*\{[^}]*grid-column:\s*3;/);
+  assert.match(desktopShellMedia, /\.app-shell\s*>\s*\.main-workspace\s*\{[^}]*grid-column:\s*4;/);
+  assert.match(desktopShellMedia, /\.app-shell\.sidebar-collapsed\s*>\s*\.main-workspace\s*\{[^}]*grid-column:\s*2;/);
+  // Ensure .sidebar-collapsed never overrides <= 760px single-column outside @media (min-width: 761px).
+  const stylesWithoutDesktopMedia = stylesCss.replace(/@media\s*\(min-width:\s*761px\)\s*\{[\s\S]*?\n\}/, "");
+  assert.doesNotMatch(stylesWithoutDesktopMedia, /\.sidebar-collapsed/);
 
   const desktopWorkspaceMedia = documentCss.match(/@media\s*\(min-width:\s*1051px\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
   assert.match(desktopWorkspaceMedia, /\.writing-workspace\s*>\s*\.document-pane\s*\{[^}]*grid-column:\s*1;/);

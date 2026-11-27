@@ -141,3 +141,12 @@
   border-color: transparent;
   border-left: 2px solid #1f6b55;
 }
+
+@media (max-width: 760px) {
+  .outline-panel {
+    grid-column: 1 / -1;
+    max-height: 12rem;
+    padding-top: 0.25rem;
+    border-top: 1px solid #d7d8d6;
+  }
+}

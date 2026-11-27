@@ -10,6 +10,7 @@ import "./styles/dialogs.css";
 import "./styles/responsive.css";
 import "./styles/document.css";
 import "./styles/layout.css";
+import "./styles/outline.css";
 
 const root = document.getElementById("root");
 

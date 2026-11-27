@@ -10,8 +10,8 @@
 | D1A | Complete | D1A-S1 補全清單打包與測試通過（258/258）、D1A-S2 程式審查完成（實機行為留待 D8 手動驗收） | — | — |
 | D2 | Complete | D2-S1–S4 完成（npm test 268/268、build 通過；1 MiB 中位數 MD 5.19 ms / LaTeX 3.56 ms，`evidence/D2-S4/`） | — | — |
 | D3 | Complete | D3-S1–S3 完成（npm test 276/276、build 通過；實機拖曳列入 D8 手動清單） | — | — |
-| D4 | In progress | D4-S1、D4-S2 OutlineView 與 outline.css 完成（npm test 279/279） | — | D4-S3 ActivityBar、Sidebar 切換、自動切換與格線收合 |
-| D5 | Not started | — | — | 等 D4 |
+| D4 | Complete | D4-S1–S3 完成（npm test 281/281、build 通過；ActivityBar、Sidebar 切換／收合、自動切換、OutlineView SSR 與 CSS 斷言皆過） | — | — |
+| D5 | Not started | — | — | D5-S1 追蹤狀態機與跳轉保護 |
 | D6 | Not started | — | — | 等 D1A、D5 |
 | D7 | Not started | — | — | 等 D5 |
 | D8 | Not started | — | — | 等 D1A、D2–D7 |
@@ -180,3 +180,14 @@
   - `app/desktop/src/styles/outline.css`：獨立捲動、長標題省略號截斷（`min-width: 0`）、目前章節與已收合祖先樣式（未改動 `.app-shell`／`.writing-workspace` 欄定義）。
   - `app/desktop/tests/outline_view.test.ts`：2 項 SSR 測試，驗證層級縮排與 `aria-level`、收合不渲染子孫、`No headings found`、未開檔提示及 `<script>`／`&` 純文字跳脫。
 - **必要檢查**：`npm test` 通過（`279 passed, 0 failed`）。
+
+### D4-S3 ActivityBar、側欄切換／收合與自動切換（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 修改 `app/desktop/src/lib/sidebar.ts`：新增純狀態轉換函式 `INITIAL_SIDEBAR_VIEW_STATE`、`selectSidebarView`、`sidebarStateOnDocumentOpen`、`sidebarStateOnDocumentCleared`。
+  - 新增 `app/desktop/src/components/ActivityBar.tsx`：內嵌 SVG 雙按鈕（Conversations／Outline），含 `aria-pressed`、`aria-expanded`、`inert`、收合標記。
+  - 修改 `app/desktop/src/components/Sidebar.tsx`：維持品牌與 backend 控制在兩種檢視固定呈現，中間區依 `view` 顯示既有對話管理或 `outlineContent`。
+  - 修改 `app/desktop/src/App.tsx`：掛載 `ActivityBar`、`useDocumentOutline`、`OutlineView`；於 `openDocument` 成功後自動切到大綱（收合時保持收合，A4）、於專案切換清空文件時切回對話管理（A5）；收合時隱藏側欄與側欄拖曳邊界並加上 `.sidebar-collapsed`。
+  - 修改 `app/desktop/src/styles.css`、`app/desktop/src/styles/layout.css`、`app/desktop/src/styles/outline.css`、`app/desktop/src/main.tsx`：加入 44 px 圖示列欄位與 `@media (min-width: 761px)` 收合雙欄規則、≤ 760 px 橫向圖示列與單欄堆疊、`outline.css` 匯入於 `layout.css` 之後。
+  - 修改 `app/desktop/tests/outline_view.test.ts` 與 `app/desktop/tests/styles.test.ts`：新增狀態轉換測試、`ActivityBar`/`Sidebar` SSR 測試、CSS 載入順序與收合斷點斷言。
+- **必要檢查**：`npm test` 通過（`281 passed, 0 failed`）；`npm run build` 通過（681 ms）。D4 完成。

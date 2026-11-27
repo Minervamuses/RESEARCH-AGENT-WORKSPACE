@@ -6,6 +6,36 @@ export interface SidebarSessionRow extends SessionSummaryDto {
   transient: boolean;
 }
 
+export type SidebarView = "conversations" | "outline";
+
+export interface SidebarViewState {
+  view: SidebarView;
+  collapsed: boolean;
+}
+
+export const INITIAL_SIDEBAR_VIEW_STATE: SidebarViewState = {
+  view: "conversations",
+  collapsed: false,
+};
+
+/** Clicking the active icon toggles collapse; clicking another icon switches and expands (U6). */
+export function selectSidebarView(current: SidebarViewState, target: SidebarView): SidebarViewState {
+  if (current.view === target) {
+    return { view: current.view, collapsed: !current.collapsed };
+  }
+  return { view: target, collapsed: false };
+}
+
+/** Opening a document selects the outline view without expanding a user-collapsed sidebar (U1, A4). */
+export function sidebarStateOnDocumentOpen(current: SidebarViewState): SidebarViewState {
+  return { view: "outline", collapsed: current.collapsed };
+}
+
+/** Clearing the open document returns the sidebar view to conversations (A5). */
+export function sidebarStateOnDocumentCleared(current: SidebarViewState): SidebarViewState {
+  return { view: "conversations", collapsed: current.collapsed };
+}
+
 export function sidebarRowsForProject(
   projectId: string,
   sessions: readonly SessionSummaryDto[],

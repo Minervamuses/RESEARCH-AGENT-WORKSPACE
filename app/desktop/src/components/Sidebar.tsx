@@ -1,16 +1,18 @@
+import type { ReactNode } from "react";
 import type { BackendSnapshot } from "../backend.ts";
 import type { ConversationSelection } from "../conversations.ts";
 import type { ProjectWorkspaceDto, SessionListDto } from "../protocol.ts";
-import { projectDisplayName, sidebarRowsForProject, type SidebarSessionRow } from "../lib/sidebar.ts";
+import { projectDisplayName, sidebarRowsForProject, type SidebarSessionRow, type SidebarView } from "../lib/sidebar.ts";
 import { phaseLabels } from "./phaseLabels.ts";
 
 export interface ConversationMenuRequest { projectId: string; session: SidebarSessionRow; left: number; top: number }
 
-/** Project browser, conversation list and backend controls. State and actions come from `App()`. */
+/** Project browser, conversation list (or document outline) and backend controls. State and actions come from `App()`. */
 export function Sidebar({
   inert, phase, snapshot, hasError, project, list, selected, selectedSaved, historyLoaded,
   newConversationDisabled, chooserDisabled, selectionDisabled, canStart, canRestart, canShutdown,
   onCreateConversation, onShowChooser, onSelectConversation, onLoadMore, onOpenMenu, onLifecycle,
+  view = "conversations", outlineContent,
 }: {
   inert: boolean;
   phase: keyof typeof phaseLabels;
@@ -36,18 +38,26 @@ export function Sidebar({
   /** `returnFocus` is the row to focus when the menu closes. */
   onOpenMenu: (menu: ConversationMenuRequest, returnFocus: HTMLElement) => void;
   onLifecycle: (action: "start" | "restart" | "shutdown") => void;
+  view?: SidebarView;
+  outlineContent?: ReactNode;
 }) {
   return <aside className="sidebar" aria-label="Research Agent workspace" inert={inert}>
     <div className="brand-lockup"><span className="brand-mark" aria-hidden="true">R</span><div><p className="eyebrow">LOCAL WORKSPACE</p><h1>Research Agent</h1></div></div>
-    <button className="new-session-button" type="button" title="Creating or selecting a conversation starts its enabled, configured MCP servers." onClick={onCreateConversation} disabled={newConversationDisabled}><span aria-hidden="true">＋</span> New conversation</button>
-    <section className="sidebar-section project-browser" aria-labelledby="workspace-label">
-      <h2 id="workspace-label">Project</h2>
-      <button type="button" onClick={onShowChooser} disabled={chooserDisabled}>{project === null ? "Open project" : "Switch project"}</button>
-      {list === null && <p className="sidebar-note">{project === null ? "Choose a project to load its conversations." : !historyLoaded ? "Loading selected project…" : "Project unavailable"}</p>}
-      {project !== null && list !== null && <ProjectGroup project={project} list={list} selected={selected} selectedSaved={selectedSaved}
-        selectionDisabled={selectionDisabled} onSelectConversation={onSelectConversation} onLoadMore={onLoadMore} onOpenMenu={onOpenMenu} />}
-    </section>
-    <div className="sidebar-spacer" />
+    {view === "outline" ? (
+      outlineContent ?? null
+    ) : (
+      <>
+        <button className="new-session-button" type="button" title="Creating or selecting a conversation starts its enabled, configured MCP servers." onClick={onCreateConversation} disabled={newConversationDisabled}><span aria-hidden="true">＋</span> New conversation</button>
+        <section className="sidebar-section project-browser" aria-labelledby="workspace-label">
+          <h2 id="workspace-label">Project</h2>
+          <button type="button" onClick={onShowChooser} disabled={chooserDisabled}>{project === null ? "Open project" : "Switch project"}</button>
+          {list === null && <p className="sidebar-note">{project === null ? "Choose a project to load its conversations." : !historyLoaded ? "Loading selected project…" : "Project unavailable"}</p>}
+          {project !== null && list !== null && <ProjectGroup project={project} list={list} selected={selected} selectedSaved={selectedSaved}
+            selectionDisabled={selectionDisabled} onSelectConversation={onSelectConversation} onLoadMore={onLoadMore} onOpenMenu={onOpenMenu} />}
+        </section>
+        <div className="sidebar-spacer" />
+      </>
+    )}
     <section className="backend-controls" aria-labelledby="backend-controls-title">
       <div className="sidebar-status" role="status" aria-live="polite"><span className={`status-dot status-${phase}`} aria-hidden="true" /><span><strong id="backend-controls-title">{phaseLabels[phase]}</strong><small>{snapshot === null ? "Desktop process not observed" : `Generation ${snapshot.generation} · ${snapshot.pendingRequests} pending`}</small></span></div>
       <div className="control-row">
