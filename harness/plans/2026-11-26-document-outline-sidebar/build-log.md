@@ -14,7 +14,7 @@
 | D5 | Complete | D5-S1–S3 完成（npm test 290/290、build 通過；Monaco 實機跳轉／Undo／Agent 修改／衝突列入 D8 手動清單） | — | — |
 | D6 | Complete | D6-S1、D6-S2 完成（npm test 294/294、build 通過、suggestController 仍存在；實機語法上色與四種引用補全列入 D8 手動清單） | — | — |
 | D7 | Complete | D7-S1、D7-S2 完成（npm test 297/297、build 通過；實機鍵盤操作列入 D8 手動清單） | — | — |
-| D8 | Complete | D8-S1 README、D8-S2 完整回歸（npm test 297/297、build、pytest 1826/1826、邊界 diff 0 B）、D8-S3 最終彙報與 7 類範例檔（`evidence/D8-S3/`）；2026-11-27 驗收：自動檢查重現通過，使用者兩輪實機確認清單 1–3、4（跳轉）、8（滑鼠拖曳） | — | 使用者：清單 4 文末、5–7、8 其餘、9–12 與 A1–A10（`evidence/acceptance-2026-11-27/acceptance.md`） |
+| D8 | Complete | D8-S1 README、D8-S2 完整回歸（npm test 297/297、build、pytest 1826/1826、邊界 diff 0 B）、D8-S3 最終彙報與 7 類範例檔（`evidence/D8-S3/`）；2026-11-27 驗收：自動檢查重現通過，使用者三輪實機確認清單 1–6（第 3 項 A4 除外）、8（滑鼠拖曳）；**G11 補全清單實機未通過** | G11 待診斷 | 使用者：回報 G11 診斷三問；清單 7、8 其餘、9–12 與 A1–A10（`evidence/acceptance-2026-11-27/acceptance.md`） |
 
 ## 撰寫紀錄
 
@@ -286,3 +286,9 @@
 
 - 使用者確認：滑鼠拖曳改欄寬、點大綱跳到章節、圖示列切換對話／大綱、重複點同一圖示收合、Ctrl+F（計劃外功能未被破壞）皆正常。
 - 仍待使用者：清單第 4 項文末 Conclusion、第 5–7、第 8 項鍵盤／雙擊／重開記憶、第 9–12 項與 A1–A10。細節更新於 `evidence/acceptance-2026-11-27/acceptance.md`。
+
+### ACC-3 使用者第三輪實機回報（2026-11-27）
+
+- 確認：第 4 項文末 Conclusion、第 5、6 項目前章節與即時更新。
+- **未通過：G11 引用補全清單「打@仍然沒有反應」**。打包與註冊表共用已核對無誤；待使用者確認是否打 `[@`、書目是否有條目、Ctrl+Space 是否顯示 `No suggestions.`。
+- 另回報無法輸入中文：WSLg 的 Linux 視窗收不到 Windows 輸入法，app 啟動環境未設 `ibus`；屬既有環境問題，非本計劃造成。
