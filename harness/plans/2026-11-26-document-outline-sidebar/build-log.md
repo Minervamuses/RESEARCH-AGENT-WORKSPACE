@@ -10,7 +10,7 @@
 | D1A | Complete | D1A-S1 補全清單打包與測試通過（258/258）、D1A-S2 程式審查完成（實機行為留待 D8 手動驗收） | — | — |
 | D2 | Complete | D2-S1–S4 完成（npm test 268/268、build 通過；1 MiB 中位數 MD 5.19 ms / LaTeX 3.56 ms，`evidence/D2-S4/`） | — | — |
 | D3 | Complete | D3-S1–S3 完成（npm test 276/276、build 通過；實機拖曳列入 D8 手動清單） | — | — |
-| D4 | In progress | D4-S1 useDocumentOutline 排程與收合純邏輯完成（npm test 277/277） | — | D4-S2 OutlineView 與 outline.css |
+| D4 | In progress | D4-S1、D4-S2 OutlineView 與 outline.css 完成（npm test 279/279） | — | D4-S3 ActivityBar、Sidebar 切換、自動切換與格線收合 |
 | D5 | Not started | — | — | 等 D4 |
 | D6 | Not started | — | — | 等 D1A、D5 |
 | D7 | Not started | — | — | 等 D5 |
@@ -172,3 +172,11 @@
   - 新增 `app/desktop/src/hooks/useDocumentOutline.ts`：僅依賴 `[rootPath, path, sourceText]` 的薄包裝 hook，另提供 `refreshNow` 供 D5 過期點擊同步重算。
   - 修改 `app/desktop/tests/outline.test.ts`：新增排程與收合狀態單元測試。
 - **必要檢查**：`npm test` 通過（`277 passed, 0 failed`）。
+
+### D4-S2 OutlineView 元件與樣式（2026-11-27，本次觀察）
+
+- **新增檔案**：
+  - `app/desktop/src/components/OutlineView.tsx`：依層級縮排（`min(depth, 5) * 0.7rem`）、`role="tree"`／`treeitem`、`aria-level`、`aria-expanded`、`aria-current`、展開／收合鈕（內嵌 SVG）、`No headings found` 與未開檔提示、純文字渲染標題與 `title` 提示、預留 `activeId`／`activeAncestorId` 與 `onSelect(node)` 介面。
+  - `app/desktop/src/styles/outline.css`：獨立捲動、長標題省略號截斷（`min-width: 0`）、目前章節與已收合祖先樣式（未改動 `.app-shell`／`.writing-workspace` 欄定義）。
+  - `app/desktop/tests/outline_view.test.ts`：2 項 SSR 測試，驗證層級縮排與 `aria-level`、收合不渲染子孫、`No headings found`、未開檔提示及 `<script>`／`&` 純文字跳脫。
+- **必要檢查**：`npm test` 通過（`279 passed, 0 failed`）。
