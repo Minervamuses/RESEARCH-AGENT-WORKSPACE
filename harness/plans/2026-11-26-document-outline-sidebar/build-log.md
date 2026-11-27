@@ -11,7 +11,7 @@
 | D2 | Complete | D2-S1–S4 完成（npm test 268/268、build 通過；1 MiB 中位數 MD 5.19 ms / LaTeX 3.56 ms，`evidence/D2-S4/`） | — | — |
 | D3 | Complete | D3-S1–S3 完成（npm test 276/276、build 通過；實機拖曳列入 D8 手動清單） | — | — |
 | D4 | Complete | D4-S1–S3 完成（npm test 281/281、build 通過；ActivityBar、Sidebar 切換／收合、自動切換、OutlineView SSR 與 CSS 斷言皆過） | — | — |
-| D5 | Not started | — | — | D5-S1 追蹤狀態機與跳轉保護 |
+| D5 | In progress | D5-S1 追蹤狀態機與跳轉保護完成（npm test 285/285） | — | D5-S2 編輯器接線、跳轉序列與過期點擊處理 |
 | D6 | Not started | — | — | 等 D1A、D5 |
 | D7 | Not started | — | — | 等 D5 |
 | D8 | Not started | — | — | 等 D1A、D2–D7 |
@@ -191,3 +191,11 @@
   - 修改 `app/desktop/src/styles.css`、`app/desktop/src/styles/layout.css`、`app/desktop/src/styles/outline.css`、`app/desktop/src/main.tsx`：加入 44 px 圖示列欄位與 `@media (min-width: 761px)` 收合雙欄規則、≤ 760 px 橫向圖示列與單欄堆疊、`outline.css` 匯入於 `layout.css` 之後。
   - 修改 `app/desktop/tests/outline_view.test.ts` 與 `app/desktop/tests/styles.test.ts`：新增狀態轉換測試、`ActivityBar`/`Sidebar` SSR 測試、CSS 載入順序與收合斷點斷言。
 - **必要檢查**：`npm test` 通過（`281 passed, 0 failed`）；`npm run build` 通過（681 ms）。D4 完成。
+
+### D5-S1 目前章節追蹤與跳轉保護狀態機（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 新增 `app/desktop/src/lib/outline/tracking.ts`：`findActiveHeadingId`（二分搜尋最內層標題）、`resolveActiveOutlineDisplay`（收合祖先標示）、`createOutlineTracker`（`useSyncExternalStore` 相容介面、跳轉保護阻擋同步與 rAF 延後的目標行／相同 `scrollTop` 事件、重算與重設）、`resolveOutlineJumpTarget`（過期點擊歧義檢查）、`jumpEditorToOffset` 與 `performOutlineClick`。
+  - 修改 `app/desktop/src/lib/outline/index.ts`：匯出追蹤與跳轉輔助函式。
+  - 新增 `app/desktop/tests/outline_tracking.test.ts`：4 項單元測試，覆蓋二分搜尋、最內層與收合祖先標示、跳轉保護重播（同步與延後捲動、不同 `scrollTop` 與游標移動解除）、重解析重算、重設清除、訂閱通知去重。
+- **必要檢查**：`npm test` 通過（`285 passed, 0 failed`）。

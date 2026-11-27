@@ -17,6 +17,20 @@ export {
   type OutlineSourceInput,
   type OutlineUpdatePlan,
 } from "./state.ts";
+export {
+  createOutlineTracker,
+  findActiveHeadingId,
+  jumpEditorToOffset,
+  MONACO_SCROLL_TYPE_IMMEDIATE,
+  performOutlineClick,
+  resolveActiveOutlineDisplay,
+  resolveOutlineJumpTarget,
+  type ActiveOutlineDisplay,
+  type EditorOutlineHandle,
+  type JumpableEditor,
+  type OutlineTracker,
+  type StaleJumpResolution,
+} from "./tracking.ts";
 export type { OutlineDocument, OutlineFormat, OutlineNode, RawHeading } from "./types.ts";
 
 export function outlineFormatForPath(path: string): OutlineFormat | null {
