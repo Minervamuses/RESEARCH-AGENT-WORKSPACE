@@ -7,7 +7,11 @@ import {
   parseLatexOutline,
   parseMarkdownOutline,
   parseOutline,
+  planOutlineUpdate,
+  pruneCollapsedIds,
+  recomputeOutline,
   stripMarkdownInline,
+  toggleCollapsedId,
   type RawHeading,
 } from "../src/lib/outline/index.ts";
 
@@ -397,4 +401,45 @@ test("UTF-16 offsets match documentPositionAt across BOM, CRLF, emoji and CJK fo
       `tex slice mismatch at offset ${node.startOffsetUtf16}: ${texFixture.slice(node.startOffsetUtf16, node.startOffsetUtf16 + 20)}`,
     );
   });
+});
+
+test("outline update planner distinguishes file switches, same-file edits, null clears and cursor-only moves", () => {
+  const docA = { rootPath: "/p", path: "a.md", sourceText: "# Intro\n## Scope\n" };
+  const docACursorMove = { rootPath: "/p", path: "a.md", sourceText: "# Intro\n## Scope\n" };
+  const docAEdited = { rootPath: "/p", path: "a.md", sourceText: "# Intro\n## Scope\nNew line\n" };
+  const docB = { rootPath: "/p", path: "b.md", sourceText: "# Other\n" };
+
+  assert.equal(planOutlineUpdate(null, null), "noop");
+  assert.equal(planOutlineUpdate(null, docA), "immediate");
+  assert.equal(planOutlineUpdate(docA, docACursorMove), "noop", "cursor/selection update with identical source must not re-parse");
+  assert.equal(planOutlineUpdate(docA, docAEdited), "debounce");
+  assert.equal(planOutlineUpdate(docA, docB), "immediate");
+  assert.equal(planOutlineUpdate(docA, null), "clear");
+
+  // Re-parsing keeps still-existing collapsed IDs and drops removed ones; switching files resets collapse.
+  const first = recomputeOutline(docA, new Set(), true);
+  const introId = first.outline.flat[0].id;
+  const scopeId = first.outline.flat[1].id;
+  let collapsed = toggleCollapsedId(first.collapsedIds, introId);
+  collapsed = toggleCollapsedId(collapsed, scopeId);
+  assert.ok(collapsed.has(introId) && collapsed.has(scopeId));
+
+  const edited = recomputeOutline(
+    { rootPath: "/p", path: "a.md", sourceText: "# Intro\n## Methods\n" },
+    collapsed,
+    false,
+  );
+  assert.ok(edited.collapsedIds.has(introId), "existing heading stays collapsed across re-parse");
+  assert.ok(!edited.collapsedIds.has(scopeId), "removed heading is pruned from collapsed set");
+
+  const switched = recomputeOutline(docB, edited.collapsedIds, true);
+  assert.equal(switched.collapsedIds.size, 0, "file switch resets collapsed state");
+  assert.deepEqual(switched.outline.flat.map((n) => n.title), ["Other"]);
+
+  const cleared = recomputeOutline(null, edited.collapsedIds, true);
+  assert.equal(cleared.outline.flat.length, 0);
+  assert.equal(cleared.collapsedIds.size, 0);
+
+  // Direct prune check with empty set.
+  assert.equal(pruneCollapsedIds(new Set(), first.outline).size, 0);
 });

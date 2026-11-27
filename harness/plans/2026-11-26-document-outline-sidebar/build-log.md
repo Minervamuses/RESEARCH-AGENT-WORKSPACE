@@ -10,7 +10,7 @@
 | D1A | Complete | D1A-S1 補全清單打包與測試通過（258/258）、D1A-S2 程式審查完成（實機行為留待 D8 手動驗收） | — | — |
 | D2 | Complete | D2-S1–S4 完成（npm test 268/268、build 通過；1 MiB 中位數 MD 5.19 ms / LaTeX 3.56 ms，`evidence/D2-S4/`） | — | — |
 | D3 | Complete | D3-S1–S3 完成（npm test 276/276、build 通過；實機拖曳列入 D8 手動清單） | — | — |
-| D4 | Not started | — | — | D4-S1 ActivityBar 與側欄檢視狀態 |
+| D4 | In progress | D4-S1 useDocumentOutline 排程與收合純邏輯完成（npm test 277/277） | — | D4-S2 OutlineView 與 outline.css |
 | D5 | Not started | — | — | 等 D4 |
 | D6 | Not started | — | — | 等 D1A、D5 |
 | D7 | Not started | — | — | 等 D5 |
@@ -163,3 +163,12 @@
   - 修改 `app/desktop/src/components/ColumnResizer.tsx` 與 `app/desktop/src/App.tsx`：改用上述純函式；`ColumnResizer` 在 `pointerup`/`pointercancel`/`lostpointercapture`/卸載皆清除 `is-dragging` 與 `body.is-resizing-columns`。
   - 修改 `app/desktop/tests/layout.test.ts`：新增鍵盤映射（含 Enter 不動作）、16 px 步進夾限、Home/End 與邊界條件測試。
 - **必要檢查**：`npm test` 通過（`276 passed, 0 failed`）；`npm run build` 通過（604 ms）。實機滑鼠拖曳與雙擊重設列入 D8 手動驗收清單。D3 完成。
+
+### D4-S1 useDocumentOutline 排程與收合狀態純邏輯（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 新增 `app/desktop/src/lib/outline/state.ts`：`OUTLINE_DEBOUNCE_MS`（180 ms）、`planOutlineUpdate`（換檔立即、同檔 debounce、`null` 清空、純游標移動 noop）、`pruneCollapsedIds`、`toggleCollapsedId`、`recomputeOutline`、`emptyOutlineDocument`。
+  - 修改 `app/desktop/src/lib/outline/index.ts`：匯出排程與收合輔助函式。
+  - 新增 `app/desktop/src/hooks/useDocumentOutline.ts`：僅依賴 `[rootPath, path, sourceText]` 的薄包裝 hook，另提供 `refreshNow` 供 D5 過期點擊同步重算。
+  - 修改 `app/desktop/tests/outline.test.ts`：新增排程與收合狀態單元測試。
+- **必要檢查**：`npm test` 通過（`277 passed, 0 failed`）。

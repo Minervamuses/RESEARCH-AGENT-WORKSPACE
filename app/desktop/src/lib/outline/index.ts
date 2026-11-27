@@ -7,6 +7,16 @@ import type { OutlineDocument, OutlineFormat } from "./types.ts";
 export { parseLatexOutline, scanLatexHeadings, cleanLatexTitle } from "./latex.ts";
 export { parseMarkdownOutline, scanMarkdownHeadings, stripMarkdownInline } from "./markdown.ts";
 export { buildOutlineTree, normalizeOutlineTitle } from "./tree.ts";
+export {
+  emptyOutlineDocument,
+  OUTLINE_DEBOUNCE_MS,
+  planOutlineUpdate,
+  pruneCollapsedIds,
+  recomputeOutline,
+  toggleCollapsedId,
+  type OutlineSourceInput,
+  type OutlineUpdatePlan,
+} from "./state.ts";
 export type { OutlineDocument, OutlineFormat, OutlineNode, RawHeading } from "./types.ts";
 
 export function outlineFormatForPath(path: string): OutlineFormat | null {
