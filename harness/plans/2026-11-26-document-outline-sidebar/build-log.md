@@ -7,7 +7,7 @@
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
 | D1 | Complete | D1-S1 唯讀核對、D1-S2 修改前基線通過（npm test 256/256、build 通過） | — | D1A-S1（或 D2、D3） |
-| D1A | In progress | D1A-S1 完成（npm test 258/258、build 通過、suggestController 已打包） | — | D1A-S2 程式審查與紀錄 |
+| D1A | Complete | D1A-S1 補全清單打包與測試通過（258/258）、D1A-S2 程式審查完成（實機行為留待 D8 手動驗收） | — | — |
 | D2 | Not started | — | — | D2-S1 型別、樹建構與穩定 ID |
 | D3 | Not started | — | — | D3-S1 寬度讀寫與夾限邏輯 |
 | D4 | Not started | — | — | 等 D2、D3 |
@@ -90,3 +90,11 @@
   - `npm run build`：通過，無 TS7016（964 modules，vite build 566 ms）。
   - `grep -c editor.contrib.suggestController dist/assets/*.js`：`dist/assets/suggestController-Dlku74Rc.js:1`（其他 JS 皆為 0）。
   - Bundle 變化（與 D1-S2 含 `monacoFeatures` 基線比較）：`index-Dxv-VZyw.js` 393.84 kB（+0.42 kB）；延遲載入的 Monaco JS 合計 3,425,229 B（相對基線 3,305,374 B 增加 +119.86 kB，含 `suggestController-Dlku74Rc.js` 114.89 kB）；延遲載入的 Monaco CSS 合計 159.58 kB（增加 +12.21 kB，含 `suggestController-DJ6Lv6Yp.css` 12.22 kB）。
+
+### D1A-S2 補全清單程式審查（2026-11-27，本次觀察）
+
+- 讀碼核對 `app/desktop/src/DocumentEditor.tsx` L49–90、L249–273：
+  - `import("monaco-editor/editor/contrib/suggest/browser/suggestController")`（L62）在既有 `Promise.all`（L58–64）內等待完成，確保早於 `monaco.editor.create`（L73）。
+  - `if (disposed || !surfaceRef.current || !snapshotRef.current) return;`（L65）維持於 `.then(...)` 第一行，換檔或卸載時不會建立孤兒實例。
+  - 未新增任何 listener 或可釋放資源；既有的 `completion?.dispose()`（L259）與 `instance.dispose()`（L262）已涵蓋釋放。
+- 未驗收實機 GUI 行為；`.md` 輸入 `[@`、一般文字不跳字詞建議、Esc 後續打重現、Ctrl+Space 手動叫出已記為 D8 手動 GUI 驗收項目。D1A 完成。
