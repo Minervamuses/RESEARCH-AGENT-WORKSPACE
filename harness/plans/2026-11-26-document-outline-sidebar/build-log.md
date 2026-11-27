@@ -12,7 +12,7 @@
 | D3 | Complete | D3-S1–S3 完成（npm test 276/276、build 通過；實機拖曳列入 D8 手動清單） | — | — |
 | D4 | Complete | D4-S1–S3 完成（npm test 281/281、build 通過；ActivityBar、Sidebar 切換／收合、自動切換、OutlineView SSR 與 CSS 斷言皆過） | — | — |
 | D5 | Complete | D5-S1–S3 完成（npm test 290/290、build 通過；Monaco 實機跳轉／Undo／Agent 修改／衝突列入 D8 手動清單） | — | — |
-| D6 | Not started | — | — | D6-S1 LaTeX Monarch 語法定義與註冊 |
+| D6 | In progress | D6-S1 LaTeX Monarch 語法定義與冪等註冊完成（npm test 293/293） | — | D6-S2 DocumentEditor 語言註冊與選擇 |
 | D7 | Not started | — | — | D7-S1 大綱鍵盤導覽純邏輯與測試 |
 | D8 | Not started | — | — | 等 D1A、D2–D7 |
 
@@ -217,3 +217,10 @@
 - **變更檔案**：
   - 修改 `app/desktop/tests/outline_tracking.test.ts`：新增完整情境模擬測試，依序覆蓋開檔、新增標題、刪除標題、改名、改層級、大量貼上（40 章節）、Agent 修改 `sourceText`、Undo 回到舊版本、切換至 `.tex` 檔，驗證排程（`immediate`/`debounce`）、大綱樹、收合保留／修剪／重設及追蹤器重算／重設。
 - **必要檢查**：`npm test` 通過（`290 passed, 0 failed`）；`npm run build` 通過（678 ms）。Monaco 內實機 Undo／Agent 修改／衝突處理列入 D8 手動驗收清單。D5 完成。
+
+### D6-S1 LaTeX Monarch 語法定義與冪等註冊（2026-11-27，本次觀察）
+
+- **新增檔案**：
+  - `app/desktop/src/lib/latexLanguage.ts`：`LATEX_LANGUAGE_ID`、`editorLanguageForPath`、`LATEX_MONARCH_LANGUAGE`（涵蓋指令、章節指令、環境、註解與 `\%`、數學 `$`/`$$`/`\(...\)`/`\[...\]`/常見數學環境、引用指令與鍵、交叉引用、括號；所有引用參數狀態絕不使用含 `string`/`comment` 的 token 名稱）、`LATEX_LANGUAGE_CONFIGURATION`（`%` 行註解與括號配對）、`registerLatexLanguage`（以 `WeakSet` 冪等註冊）。
+  - `app/desktop/tests/latex_language.test.ts`：3 項測試，驗證副檔名語言對應、重複呼叫僅註冊一次、所有規則正規表示式可編譯、引用狀態無 `string`/`comment` token 且支援 `\cite{`／`\citep{`／`\citet{`／`\textcite{`。
+- **必要檢查**：`npm test` 通過（`293 passed, 0 failed`）。
