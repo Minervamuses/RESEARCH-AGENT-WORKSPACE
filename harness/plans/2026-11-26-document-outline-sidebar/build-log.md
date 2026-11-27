@@ -14,7 +14,7 @@
 | D5 | Complete | D5-S1–S3 完成（npm test 290/290、build 通過；Monaco 實機跳轉／Undo／Agent 修改／衝突列入 D8 手動清單） | — | — |
 | D6 | Complete | D6-S1、D6-S2 完成（npm test 294/294、build 通過、suggestController 仍存在；實機語法上色與四種引用補全列入 D8 手動清單） | — | — |
 | D7 | Complete | D7-S1、D7-S2 完成（npm test 297/297、build 通過；實機鍵盤操作列入 D8 手動清單） | — | — |
-| D8 | Complete | D8-S1 README、D8-S2 完整回歸（npm test 297/297、build、pytest 1826/1826、邊界 diff 0 B）、D8-S3 最終彙報與 7 類範例檔（`evidence/D8-S3/`） | — | 使用者：執行手動 GUI 清單並確認 A1–A10 |
+| D8 | Complete | D8-S1 README、D8-S2 完整回歸（npm test 297/297、build、pytest 1826/1826、邊界 diff 0 B）、D8-S3 最終彙報與 7 類範例檔（`evidence/D8-S3/`）；2026-11-27 驗收：自動檢查重現通過，使用者實機確認清單 1、2、3（切換） | — | 使用者：清單 3（收合）、4–12 與 A1–A10（`evidence/acceptance-2026-11-27/acceptance.md`） |
 
 ## 撰寫紀錄
 
@@ -272,3 +272,12 @@
   - `harness/plans/2026-11-26-document-outline-sidebar/evidence/D8-S3/final-report.md`：涵蓋 G1–G11 證據對照、全階段 commit 清單、修改前後測試／效能／bundle 數字、授權邊界查核、已知限制、U6 收合提醒、A1–A10 待確認假設、`for_agents/` 待 `$infrastructure` 更新段落及 12 項手動 GUI 驗收清單（明確未宣稱任何 GUI 實機行為已驗證）。
   - `harness/plans/2026-11-26-document-outline-sidebar/evidence/D8-S3/fixtures/`：7 類手動 GUI 驗收範例檔（`01-multilevel-paper.md`、`02-multilevel-paper.tex`、`03-bilingual-cjk-english.md`、`04-long-many-sections.md`、`05-duplicate-headings.md`、`06-no-headings.md`、`07-in-progress-incomplete.md`、`07b-in-progress-incomplete.tex`）。
 - **整體完成判定**：PLANS「整體完成條件」第 1–5 項均已達成；D1、D1A、D2–D8 皆 `Complete`。下一步由使用者依 `final-report.md` 執行手動 GUI 驗收並確認 A1–A10。
+
+## 驗收
+
+### ACC-1 使用者實機回報與驗收者重跑（2026-11-27）
+
+- **使用者實機**：切換左側、顯示大綱、換檔後大綱跟著換都正常（final-report 清單第 1、2 項與第 3 項的切換）。其餘項目尚未回報。
+- **驗收者重跑（本次觀察）**：`npm test` 297/297；`npm run build` 通過且含 `suggestController`；邊界 diff 0 bytes；pytest 未重跑（後端 0 改動）。
+- **讀碼與解析器探測**：29 個邊界輸入符合〈解析規格〉；兩項不阻塞的發現（LaTeX 標題留下未知指令名、中斷的拖曳仍會寫入寬度）。
+- 細節：`evidence/acceptance-2026-11-27/acceptance.md`。
