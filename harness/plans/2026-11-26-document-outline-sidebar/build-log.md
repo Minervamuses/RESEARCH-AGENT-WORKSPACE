@@ -6,10 +6,10 @@
 
 | 階段 | 狀態 | 證據 | 阻塞 | 下一步 |
 |---|---|---|---|---|
-| D1 | In progress | D1-S1 唯讀核對完成 | — | D1-S2 修改前基線 |
-| D1A | Not started | — | — | 等 D1 |
-| D2 | Not started | — | — | 等 D1 |
-| D3 | Not started | — | — | 等 D1 |
+| D1 | Complete | D1-S1 唯讀核對、D1-S2 修改前基線通過（npm test 256/256、build 通過） | — | D1A-S1（或 D2、D3） |
+| D1A | Not started | — | — | D1A-S1 補全清單控制器與選項 |
+| D2 | Not started | — | — | D2-S1 型別、樹建構與穩定 ID |
+| D3 | Not started | — | — | D3-S1 寬度讀寫與夾限邏輯 |
 | D4 | Not started | — | — | 等 D2、D3 |
 | D5 | Not started | — | — | 等 D4 |
 | D6 | Not started | — | — | 等 D1A、D5 |
@@ -64,3 +64,16 @@
   - `app/desktop/src/components/Sidebar.tsx`（92 行）、`app/desktop/src/styles/responsive.css`（110 行）均與基線一致
 - **工具環境（Conda `app`）**：`/home/minervamuses/miniconda3/envs/app/bin` 下 `node v24.18.0`、`npm 11.16.0`、`cargo`、`python` 均可用。
 - **結論**：所有基線條件成立，無需修訂後續階段檔。
+
+### D1-S2 修改前基線（2026-11-27，本次觀察）
+
+- **`npm test`**（`app/desktop/`）：`256 passed, 0 failed`（node test runner 6,469 ms，wall 5.93 s），無既有失敗。
+- **`npm run build`**（`app/desktop/`）：`tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vite build` 通過（wall 4.49 s，vite build 580 ms，940 modules）。
+- **`dist/assets/` 基線大小**（含 `5be1978` 的 `monacoFeatures` 拆包）：
+  - `index-DXhwvsi3.js`: `393.42 kB`（393,428 B，gzip 112.00 kB）
+  - `editor.api-BKMlSWig.js`: `547.91 kB`（547,913 B，gzip 142.70 kB）
+  - `monacoFeatures-DMQ4CnLk.js`: `581.49 kB`（581,499 B，gzip 142.69 kB）
+  - `editorState-CjudPH6-.js`: `2,175.96 kB`（2,175,962 B，gzip 560.96 kB）
+  - Monaco JS 合計：3,305,374 B；CSS：`index` 25.33 kB、`editor` 51.94 kB、`monacoFeatures` 48.29 kB、`editorState` 47.14 kB；字型：`codicon` 153.22 kB。
+  - `grep -c editor.contrib.suggestController dist/assets/*.js`：全為 0（確認 D1A 既有缺陷基線）。
+- 未跑完整 pytest（排於 D8）。D1 完成。
