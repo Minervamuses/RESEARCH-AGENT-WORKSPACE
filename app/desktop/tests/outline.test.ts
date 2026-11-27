@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseMarkdownOutline, stripMarkdownInline } from "../src/lib/outline/markdown.ts";
-import { buildOutlineTree } from "../src/lib/outline/tree.ts";
-import type { RawHeading } from "../src/lib/outline/types.ts";
+import {
+  buildOutlineTree,
+  outlineFormatForPath,
+  parseLatexOutline,
+  parseMarkdownOutline,
+  parseOutline,
+  stripMarkdownInline,
+  type RawHeading,
+} from "../src/lib/outline/index.ts";
 
 function makeRaw(
   items: readonly { title: string; level: number; lineNumber: number; start: number; end?: number }[],
@@ -253,4 +259,91 @@ test("Markdown scanner excludes code fences, indented code, HTML comments, YAML,
   const empty = parseMarkdownOutline("");
   assert.deepEqual(empty.roots, []);
   assert.deepEqual(empty.flat, []);
+});
+
+test("LaTeX scanner parses all 7 sectioning levels, starred forms, optional short titles, multiline and nested braces", () => {
+  const tex = [
+    "\\part{Part One}",
+    "\\chapter*{Introduction}",
+    "\\section[Short Title]{Full \\textbf{Bold} and \\emph{Nested {Braces}} Title}",
+    "\\subsection{Multi-line",
+    "  % comment inside title",
+    "  Heading with 50\\% Gain}",
+    "\\subsubsection{Sub-sub \\label{sec:subsub}}",
+    "\\paragraph{Para}",
+    "\\subparagraph{Subpara}",
+  ].join("\n");
+
+  const doc = parseLatexOutline(tex);
+  assert.equal(doc.format, "latex");
+  assert.deepEqual(
+    doc.flat.map((n) => [n.level, n.depth, n.title, n.lineNumber]),
+    [
+      [0, 0, "Part One", 1],
+      [1, 1, "Introduction", 2],
+      [2, 2, "Full Bold and Nested Braces Title", 3],
+      [3, 3, "Multi-line Heading with 50% Gain", 4],
+      [4, 4, "Sub-sub", 7],
+      [5, 5, "Para", 8],
+      [6, 6, "Subpara", 9],
+    ],
+  );
+  // Document starting directly at \section nests relative to \section.
+  const article = parseLatexOutline("\\section{A}\n\\subsection{A1}\n\\section{B}\n");
+  assert.deepEqual(article.roots.map((n) => n.title), ["A", "B"]);
+  assert.equal(article.roots[0].depth, 0);
+  assert.equal(article.roots[0].children[0].depth, 1);
+});
+
+test("LaTeX scanner excludes comments, verbatim environments, \\verb, macro definitions and incomplete trailing headings", () => {
+  const tex = [
+    "% \\section{Commented Out}",
+    "Text with 100\\% real \\section{After Escaped Percent}",
+    "Line break \\\\% \\section{Comment After Linebreak}",
+    "\\begin{verbatim}",
+    "\\section{Inside verbatim}",
+    "\\end{verbatim}",
+    "\\begin{verbatim*}",
+    "\\section{Inside verbatim star}",
+    "\\end{verbatim*}",
+    "\\begin{lstlisting}",
+    "\\section{Inside lstlisting}",
+    "\\end{lstlisting}",
+    "\\begin{minted}{tex}",
+    "\\section{Inside minted}",
+    "\\end{minted}",
+    "\\begin{comment}",
+    "\\section{Inside comment env}",
+    "\\end{comment}",
+    "Inline \\verb|\\section{Inside verb}| and \\verb*+\\chapter{Inside verb star}+.",
+    "\\newcommand{\\mysec}[1]{\\section{#1}}",
+    "\\renewcommand*\\othersec[1][x]{\\subsection{Fake #1}}",
+    "\\providecommand{\\psec}{\\section{Fake Provided}}",
+    "\\def\\dsec#1{\\section{Fake Def #1}}",
+    "\\section{Valid Final}",
+    "\\subsection{Incomplete Unclosed",
+  ].join("\n");
+
+  const doc = parseLatexOutline(tex);
+  assert.deepEqual(
+    doc.flat.map((n) => [n.title, n.lineNumber]),
+    [
+      ["After Escaped Percent", 2],
+      ["Valid Final", 24],
+    ],
+  );
+});
+
+test("parseOutline dispatches by extension case-insensitively and returns empty for unsupported files", () => {
+  assert.equal(outlineFormatForPath("paper.md"), "markdown");
+  assert.equal(outlineFormatForPath("CHAPTER.MARKDOWN"), "markdown");
+  assert.equal(outlineFormatForPath("thesis.TEX"), "latex");
+  assert.equal(outlineFormatForPath("notes.txt"), null);
+
+  assert.equal(parseOutline("a.MD", "# Hello").flat[0].title, "Hello");
+  assert.equal(parseOutline("a.tex", "\\section{Hello}").flat[0].title, "Hello");
+  const unknown = parseOutline("notes.txt", "# Not parsed");
+  assert.equal(unknown.format, null);
+  assert.deepEqual(unknown.roots, []);
+  assert.deepEqual(unknown.flat, []);
 });
