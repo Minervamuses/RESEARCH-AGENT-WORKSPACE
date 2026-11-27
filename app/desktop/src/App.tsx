@@ -1803,6 +1803,7 @@ export default function App() {
     outline: documentOutline,
     collapsedIds: outlineCollapsedIds,
     toggleCollapsed: toggleOutlineCollapsed,
+    setCollapsed: setOutlineCollapsed,
     refreshNow: refreshOutlineNow,
   } = useDocumentOutline(documentValue);
   const outlineTrackerRef = useRef<OutlineTracker | null>(null);
@@ -1993,6 +1994,7 @@ export default function App() {
       collapsedIds={outlineCollapsedIds}
       tracker={outlineTrackerRef.current}
       onToggleCollapse={toggleOutlineCollapsed}
+      onSetCollapsed={setOutlineCollapsed}
       onSelect={handleSelectOutlineNode}
     />
   );

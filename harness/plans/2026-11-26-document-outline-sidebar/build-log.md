@@ -13,8 +13,8 @@
 | D4 | Complete | D4-S1–S3 完成（npm test 281/281、build 通過；ActivityBar、Sidebar 切換／收合、自動切換、OutlineView SSR 與 CSS 斷言皆過） | — | — |
 | D5 | Complete | D5-S1–S3 完成（npm test 290/290、build 通過；Monaco 實機跳轉／Undo／Agent 修改／衝突列入 D8 手動清單） | — | — |
 | D6 | Complete | D6-S1、D6-S2 完成（npm test 294/294、build 通過、suggestController 仍存在；實機語法上色與四種引用補全列入 D8 手動清單） | — | — |
-| D7 | In progress | D7-S1 大綱鍵盤導覽純邏輯完成（npm test 296/296） | — | D7-S2 OutlineView roving tabindex、ARIA 與鍵盤接線 |
-| D8 | Not started | — | — | 等 D1A、D2–D7 |
+| D7 | Complete | D7-S1、D7-S2 完成（npm test 297/297、build 通過；實機鍵盤操作列入 D8 手動清單） | — | — |
+| D8 | Not started | — | — | D8-S1 README 更新 |
 
 ## 撰寫紀錄
 
@@ -243,3 +243,12 @@
   - 修改 `app/desktop/src/lib/outline/index.ts`：匯出鍵盤導覽函式。
   - 新增 `app/desktop/tests/outline_keyboard.test.ts`：2 項測試，驗證葉節點／展開／收合／首尾邊界、組字中與非目標按鍵略過。
 - **必要檢查**：`npm test` 通過（`296 passed, 0 failed`）。
+
+### D7-S2 OutlineView roving tabindex、焦點樣式與鍵盤接線（2026-11-27，本次觀察）
+
+- **變更檔案**：
+  - 修改 `app/desktop/src/components/OutlineView.tsx`：整棵樹採 roving tabindex（唯一 `tabIndex=0`，其餘與展開鈕皆 `tabIndex=-1`），綁定大綱區域限定 `onKeyDown`（支援 Up/Down/Home/End/Left/Right/Enter，組字中不處理、僅對已處理鍵呼叫 `preventDefault`），不加全域快捷鍵。
+  - 修改 `app/desktop/src/styles/outline.css`：強化 `.outline-item-button:focus-visible` 可見 focus ring。
+  - 修改 `app/desktop/src/App.tsx`：傳入 `onSetCollapsed={setOutlineCollapsed}`。
+  - 修改 `app/desktop/tests/outline_view.test.ts`：新增 SSR 測試斷言整棵樹僅有一個 `tabIndex=0`、`role="tree"`/`treeitem`、`aria-level`、`aria-expanded` 正確。
+- **必要檢查**：`npm test` 通過（`297 passed, 0 failed`）；`npm run build` 通過（759 ms）。實機鍵盤導覽與中文輸入法驗證列入 D8 手動清單。D7 完成。

@@ -237,3 +237,24 @@ test("OutlineView SSR reflects tracker active item and collapsed-ancestor highli
   assert.doesNotMatch(collapsedHtml, />Leaf</);
   assert.match(collapsedHtml, new RegExp(ch1.title));
 });
+
+test("OutlineView SSR enforces roving tabindex with exactly one tabIndex=0 and valid tree ARIA attributes", async () => {
+  const { OutlineView } = await loadOutlineView();
+  const outline = parseOutline("paper.md", "# Chapter 1\n## Section A\n### Leaf\n# Chapter 2\n");
+  const [, secA] = outline.flat;
+
+  const html = renderToStaticMarkup(createElement(OutlineView, {
+    documentPath: "paper.md",
+    outline,
+    collapsedIds: new Set<string>([secA.id]),
+    onToggleCollapse: () => {},
+    onSelect: () => {},
+  }));
+
+  const tabZeroMatches = html.match(/tabindex="0"/gi) ?? [];
+  assert.equal(tabZeroMatches.length, 1, "roving tabindex must expose exactly one tabIndex=0 element in the tree");
+  assert.match(html, /role="tree"/);
+  assert.match(html, /role="treeitem"[^>]*aria-level="1"[^>]*aria-expanded="true"/);
+  assert.match(html, /role="treeitem"[^>]*aria-level="2"[^>]*aria-expanded="false"/);
+  assert.match(html, /class="outline-toggle[^"]*"[^>]*tabindex="-1"|tabindex="-1"[^>]*class="outline-toggle/i);
+});

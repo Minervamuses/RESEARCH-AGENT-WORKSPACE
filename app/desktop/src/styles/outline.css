@@ -116,7 +116,8 @@
 .outline-item-button:focus-visible,
 .outline-toggle:focus-visible {
   outline: 2px solid #1f6b55;
-  outline-offset: -1px;
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 1px rgba(31, 107, 85, 0.25);
 }
 
 .outline-item-title {
